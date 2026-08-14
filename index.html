@@ -2279,7 +2279,7 @@ function speakCCM(text){
   var u=new SpeechSynthesisUtterance(text.replace(/\$/g,' dollars '));
   u.rate=1; u.pitch=1; window.speechSynthesis.speak(u);
 }
-/* ---------- Context builder for the agentic local AI (see WebLLM module at end of file) ---------- */
+/* ---------- Context builder for the agentic local AI (Ollama on UBU01, see module at end of file) ---------- */
 function buildCCMContext(){
   var ids = askCCMCurrentScope() === 'all' ? CLIENTS : [clientById(askCCMCurrentScope())];
   var clientsSummary = ids.map(function(c){
@@ -2321,7 +2321,7 @@ function sendAskCCM(channel){
   }
 
   var loadingMsgId = addCCMMessage('assistant', 'Thinking…', channel);
-  window.callAgenticLLM(q, function(progressText){
+  callAgenticLLM(q, function(progressText){
     updateCCMMessage(loadingMsgId, progressText);
   }).then(function(text){
     updateCCMMessage(loadingMsgId, text);
@@ -2436,43 +2436,17 @@ loadExtraData().then(function(){
   render();
 });
 </script>
-<script type="module">
+<script>
 /* =====================================================================
-   AGENTIC LOCAL AI — WebLLM, fully in-browser, self-hosted on UBU01
+   AGENTIC LOCAL AI — Ollama, running on UBU01, reachable via your org VPN
    ---------------------------------------------------------------------
-   No cloud, no third-party AI vendor, no data leaves this device.
-   The model file itself is fetched once from your own lab server
-   (UBU01) and cached by the browser; all inference after that runs
-   on-device via WebGPU. Nothing here calls out to the public internet
-   except this one small open-source library file (not your data).
-
-   VERIFY BEFORE USE: the WebLLM API and model catalog move quickly.
-   Check https://github.com/mlc-ai/web-llm for the current API surface
-   and https://github.com/mlc-ai/binary-mlc-llm-libs for the correct
-   model_lib wasm URL matching whatever model/quantization you host.
-   The values below are best-effort scaffolding, not guaranteed exact.
+   No cloud, no third-party AI vendor. Ollama runs on infrastructure you
+   control (UBU01), locked to your VPN range at the firewall. Nothing
+   here calls out to the public internet at inference time.
    ===================================================================== */
-import { CreateMLCEngine } from "https://esm.run/@mlc-ai/web-llm";
-
-// EDIT THESE THREE to match your actual UBU01 setup.
-var UBU01_BASE = "http://10.134.15.166";                 // your lab server, reachable via VPN
-var MODEL_ID = "Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC";     // must match the folder name you downloaded
-var MODEL_WEIGHTS_URL = UBU01_BASE + "/models/hermes2pro/"; // where you served the downloaded weights
-
-var appConfig = {
-  model_list: [{
-    model: MODEL_WEIGHTS_URL,
-    model_id: MODEL_ID,
-    // model_lib must point at the matching prebuilt wasm runtime for this
-    // model + quantization — get the current URL from mlc-ai/binary-mlc-llm-libs
-    // on GitHub for the version of web-llm you're loading above.
-    model_lib: "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_84/base/Llama-3-8B-Instruct-q4f16_1_cs1k-webgpu.wasm",
-    overrides: { context_window_size: 4096 }
-  }]
-};
-
-var engine = null;
-var engineLoading = null;
+var OLLAMA_URL = "http://10.134.15.166:11434/api/chat";
+var OLLAMA_MODEL = "llama3.2:3b";
+var OLLAMA_TIMEOUT_MS = 30000;
 
 // ---- Tool schema: the ONLY actions the model is allowed to trigger.
 // The model can propose a call; this code validates and executes it.
@@ -2489,29 +2463,19 @@ var AGENT_TOOLS = [
       parameters: { type: "object", properties: { recommendationId: { type: "number" } }, required: ["recommendationId"] } } }
 ];
 
-function ensureEngine(onProgress){
-  if (engine) return Promise.resolve(engine);
-  if (engineLoading) return engineLoading;
-  engineLoading = CreateMLCEngine(MODEL_ID, {
-    appConfig: appConfig,
-    initProgressCallback: function(p){ if (onProgress) onProgress(p.text || ("Loading model… " + Math.round((p.progress||0)*100) + "%")); }
-  }).then(function(e){ engine = e; return e; });
-  return engineLoading;
-}
-
 // Executes a tool call. Read/navigation tools run immediately.
 // request_approval only ever opens the existing human-confirmation card —
 // it can never approve a change by itself, regardless of what the model outputs.
 function executeAgentTool(name, args){
   try {
-    if (name === "navigate_to"){ window.setMode(args.mode); return "Switched to " + args.mode + "."; }
-    if (name === "filter_by_client"){ window.setSelectedClient(args.clientId); return "Filtered to " + args.clientId + "."; }
-    if (name === "set_whatif_confidence"){ window.setWhatIfConfidence(Math.max(50, Math.min(100, Number(args.confidence)))); return "Simulator set to " + args.confidence + "% confidence."; }
+    if (name === "navigate_to"){ setMode(args.mode); return "Switched to " + args.mode + "."; }
+    if (name === "filter_by_client"){ setSelectedClient(args.clientId); return "Filtered to " + args.clientId + "."; }
+    if (name === "set_whatif_confidence"){ setWhatIfConfidence(Math.max(50, Math.min(100, Number(args.confidence)))); return "Simulator set to " + args.confidence + "% confidence."; }
     if (name === "request_approval"){
-      var op = (window.ops || []).filter(function(o){ return o.id === args.recommendationId; })[0];
+      var op = ops.filter(function(o){ return o.id === args.recommendationId; })[0];
       if (!op) return "No recommendation with id " + args.recommendationId + " was found.";
       if (op.status !== "needs_approval") return "Recommendation " + args.recommendationId + " is not awaiting approval (status: " + op.status + ").";
-      window.showCCMApprovalConfirmation(op);
+      showCCMApprovalConfirmation(op);
       return "Opened the approval confirmation card for recommendation " + args.recommendationId + " — a human still has to confirm it.";
     }
     return "Unknown tool: " + name;
@@ -2520,31 +2484,47 @@ function executeAgentTool(name, args){
   }
 }
 
-// Exposed globally so the app's existing (non-module) script can call it.
-window.callAgenticLLM = function(question, onProgress){
-  return ensureEngine(onProgress).then(function(eng){
-    var context = window.buildCCMContext();
-    var systemPrompt = "You are Ask CCM, an agentic FinOps cost advisor embedded in a cloud cost management console. " +
-      "Answer using ONLY the JSON data below — never invent numbers. Use a tool call when the user asks you to DO something " +
-      "(navigate, filter, adjust the simulator, or start an approval); otherwise just answer in text, concisely (max 4-5 sentences), " +
-      "citing real figures.\nData:\n" + JSON.stringify(context);
+function callAgenticLLM(question, onProgress){
+  if (onProgress) onProgress("Thinking…");
+  var context = buildCCMContext();
+  var systemPrompt = "You are Ask CCM, an agentic FinOps cost advisor embedded in a cloud cost management console. " +
+    "Answer using ONLY the JSON data below — never invent numbers. Use a tool call when the user asks you to DO something " +
+    "(navigate, filter, adjust the simulator, or start an approval); otherwise just answer in text, concisely (max 4-5 sentences), " +
+    "citing real figures.\nData:\n" + JSON.stringify(context);
 
-    return eng.chat.completions.create({
+  var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  var timeoutId = controller ? setTimeout(function(){ controller.abort(); }, OLLAMA_TIMEOUT_MS) : null;
+
+  return fetch(OLLAMA_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: controller ? controller.signal : undefined,
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      stream: false,
       messages: [ { role: "system", content: systemPrompt }, { role: "user", content: question } ],
-      tools: AGENT_TOOLS,
-      tool_choice: "auto"
-    });
-  }).then(function(response){
-    var msg = response.choices[0].message;
+      tools: AGENT_TOOLS
+    })
+  }).then(function(res){
+    if (timeoutId) clearTimeout(timeoutId);
+    if (!res.ok) throw new Error("Ollama HTTP " + res.status);
+    return res.json();
+  }).then(function(data){
+    var msg = data && data.message;
+    if (!msg) throw new Error("Empty response from local model");
     if (msg.tool_calls && msg.tool_calls.length){
       return msg.tool_calls.map(function(tc){
-        var args = {}; try { args = JSON.parse(tc.function.arguments); } catch(e){}
-        return executeAgentTool(tc.function.name, args);
+        var args = tc.function.arguments;
+        if (typeof args === "string"){ try { args = JSON.parse(args); } catch(e){ args = {}; } }
+        return executeAgentTool(tc.function.name, args || {});
       }).join(" ");
     }
     return msg.content || "I could not generate a response.";
+  }).catch(function(err){
+    if (timeoutId) clearTimeout(timeoutId);
+    throw err;
   });
-};
+}
 </script>
 </body>
 </html>
