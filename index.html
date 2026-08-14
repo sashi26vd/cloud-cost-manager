@@ -233,6 +233,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       <button class="navbtn active" id="nav-dashboard" onclick="setMode('dashboard')"></button>
       <button class="navbtn" id="nav-visibility" onclick="setMode('visibility')"></button>
       <button class="navbtn" id="nav-tags" onclick="setMode('tags')"></button>
+      <button class="navbtn" id="nav-unitecon" onclick="setMode('unitecon')"></button>
       <button class="navbtn" id="nav-cockpit" onclick="setMode('cockpit')"></button>
       <button class="navbtn" id="nav-approvals" onclick="setMode('approvals')"></button>
       <button class="navbtn" id="nav-execution" onclick="setMode('execution')"></button>
@@ -344,6 +345,15 @@ var CLIENTS = [
   { id: "nova", name: "Nova Health", clouds: ["Azure", "AWS"], monthlySpend: 51900, cloudSpend: { Azure: 38900, AWS: 13000 }, budget: 55000 },
   { id: "lumen", name: "Lumen Robotics", clouds: ["AWS", "GCP"], monthlySpend: 133500, cloudSpend: { AWS: 78500, GCP: 55000 }, budget: 125000 }
 ];
+
+// Illustrative unit economics — real deployment would pull these counts from
+// each client's own usage/billing system (orders processed, active patient
+// records, devices under management, etc.), not from cloud spend itself.
+var UNIT_METRICS = {
+  acme:  { unitLabel: "active shoppers",           unitCount: 42000, unitCountPrior: 39500, priorMonthSpend: 82950 },
+  nova:  { unitLabel: "patient records processed", unitCount: 18500, unitCountPrior: 17200, priorMonthSpend: 46440 },
+  lumen: { unitLabel: "connected devices managed", unitCount: 3200,  unitCountPrior: 2900,  priorMonthSpend: 130500 }
+};
 
 var ops = [
   { id: 1, client: "acme", cloud: "AWS", title: "Idle prod-db-replica-03", category: "Idle resource",
@@ -605,6 +615,7 @@ var NAV_ITEMS = [
   { id: 'nav-dashboard', mode: 'dashboard', icon: 'barChart', label: 'Dashboard' },
   { id: 'nav-visibility', mode: 'visibility', icon: 'layers', label: 'Cost Visibility' },
   { id: 'nav-tags', mode: 'tags', icon: 'checkCircle', label: 'Tag Compliance' },
+  { id: 'nav-unitecon', mode: 'unitecon', icon: 'trendingDown', label: 'Unit Economics' },
   { id: 'nav-cockpit', mode: 'cockpit', icon: 'grid', label: 'MSP cockpit' },
   { id: 'nav-approvals', mode: 'approvals', icon: 'clipboardCheck', label: 'Approval Centre' },
   { id: 'nav-execution', mode: 'execution', icon: 'playCircle', label: 'Execution & Validation' },
@@ -642,7 +653,12 @@ function renderNav(){
 /* ---------- render: dashboard ---------- */
 function hbarChart(items){
   if (!items.length){ return '<div class="empty">No data for this selection yet.</div>'; }
-  var labelW = 160, chartW = 340, rowH = 30, gap = 12;
+  var chartW = 340, rowH = 30, gap = 12;
+  // Label column sizes itself to the longest label (approx px-per-character
+  // for this font/size), clamped to a sane range, so long labels (e.g. "app
+  // name (client name)") never overlap the bar the way a fixed width would.
+  var longestLabel = items.reduce(function(m, it){ return Math.max(m, String(it.label).length); }, 0);
+  var labelW = Math.max(110, Math.min(260, longestLabel * 6.6 + 10));
   var max = Math.max.apply(null, items.map(function(i){ return i.value; })) || 1;
   var svgH = items.length * (rowH + gap) - gap;
   var rows = items.map(function(it, idx){
@@ -1800,6 +1816,62 @@ function renderVisibility(){
   document.getElementById('content').innerHTML = filterHtml + statsHtml + gaugeHtml + anomalyHtml + chartsHtml + donutsHtml + tableHtml + narrativeHtml;
 }
 
+/* ---------- render: Unit Economics ---------- */
+function renderUnitEconomics(){
+  var totalSpend = CLIENTS.reduce(function(s,c){ return s + c.monthlySpend; }, 0);
+  var totalUnits = CLIENTS.reduce(function(s,c){ return s + UNIT_METRICS[c.id].unitCount; }, 0);
+  var totalPriorSpend = CLIENTS.reduce(function(s,c){ return s + UNIT_METRICS[c.id].priorMonthSpend; }, 0);
+  var totalPriorUnits = CLIENTS.reduce(function(s,c){ return s + UNIT_METRICS[c.id].unitCountPrior; }, 0);
+  var blendedNow = totalSpend / totalUnits;
+  var blendedPrior = totalPriorSpend / totalPriorUnits;
+  var blendedTrendPct = ((blendedNow - blendedPrior) / blendedPrior) * 100;
+
+  var improving = CLIENTS.filter(function(c){
+    var m = UNIT_METRICS[c.id];
+    return (c.monthlySpend / m.unitCount) < (m.priorMonthSpend / m.unitCountPrior);
+  }).length;
+
+  var statsHtml = '<div class="stats">' +
+    '<div class="stat-card"><div class="stat-label">Blended cost per unit</div><div class="stat-value display">$' + blendedNow.toFixed(2) + '</div><div class="stat-sub">across all clients, all unit types</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Month-over-month trend</div><div class="stat-value display" style="color:' + (blendedTrendPct <= 0 ? 'var(--green-dark)' : 'var(--coral-dark)') + ';">' + (blendedTrendPct <= 0 ? '\u2212' : '+') + Math.abs(blendedTrendPct).toFixed(1) + '%</div><div class="stat-sub">' + (blendedTrendPct <= 0 ? 'efficiency improving' : 'efficiency worsening') + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Clients improving efficiency</div><div class="stat-value display">' + improving + ' of ' + CLIENTS.length + '</div><div class="stat-sub">cost-per-unit trending down</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Total business units served</div><div class="stat-value display">' + totalUnits.toLocaleString('en-US') + '</div><div class="stat-sub">summed across different unit types</div></div>' +
+    '</div>';
+
+  var clientCards = '<div class="dash-grid" style="margin-top:16px;">' + CLIENTS.map(function(c){
+    var m = UNIT_METRICS[c.id];
+    var now = c.monthlySpend / m.unitCount;
+    var prior = m.priorMonthSpend / m.unitCountPrior;
+    var trendPct = ((now - prior) / prior) * 100;
+    var good = trendPct <= 0;
+    return '<div class="card">' +
+      '<div class="section-title">' + c.name + '</div>' +
+      '<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">' + m.unitCount.toLocaleString('en-US') + ' ' + m.unitLabel + ' this month (' + (m.unitCount >= m.unitCountPrior ? '+' : '') + (m.unitCount - m.unitCountPrior).toLocaleString('en-US') + ' vs last month)</div>' +
+      '<div style="display:flex;gap:28px;">' +
+      '<div><div class="stat-label">Cost per unit</div><div class="stat-value display" style="font-size:22px;">$' + now.toFixed(2) + '</div></div>' +
+      '<div><div class="stat-label">vs last month</div><div class="stat-value display" style="font-size:22px;color:' + (good ? 'var(--green-dark)' : 'var(--coral-dark)') + ';">' + (good ? '\u2212' : '+') + Math.abs(trendPct).toFixed(1) + '%</div></div>' +
+      '</div>' +
+      '<div class="narrative-card" style="margin-top:10px;font-size:12px;">' + (good
+        ? 'Cost per ' + m.unitLabel.replace(/s$/,'') + ' improved \u2014 spend grew slower than usage. Likely economies of scale, not waste.'
+        : 'Cost per ' + m.unitLabel.replace(/s$/,'') + ' worsened \u2014 spend is growing faster than usage. Worth investigating before it compounds.') + '</div>' +
+      '</div>';
+  }).join('') + '</div>';
+
+  var appRows = APPLICATIONS.map(function(a){ return { app: a, monthlyCost: a.dailyBase * 30 }; })
+    .sort(function(x,y){ return y.monthlyCost - x.monthlyCost; });
+  var appItems = appRows.map(function(x){
+    return { label: x.app.name + ' (' + clientById(x.app.client).name + ')', value: x.monthlyCost, valueLabel: money(x.monthlyCost) + '/mo', color: 'var(--purple)' };
+  });
+  var appHtml = '<div class="card" style="margin-top:16px;">' +
+    '<div class="section-title">Cost per application \u2014 a proxy for cost per feature</div>' +
+    '<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">Named applications ranked by estimated monthly run-rate. This is the closest read on "cost per feature" available without product-usage telemetry.</div>' +
+    hbarChart(appItems) + '</div>';
+
+  var narrativeHtml = '<div class="narrative-card" style="margin-top:16px;">Unit counts (shoppers, patient records, connected devices) are illustrative demo figures set for this walkthrough. Real unit economics requires integrating each client\u2019s own usage or billing system to pull actual customer, transaction, or workload counts \u2014 cloud spend data alone never contains this information.</div>';
+
+  document.getElementById('content').innerHTML = statsHtml + clientCards + appHtml + narrativeHtml;
+}
+
 /* ---------- render: Tag Compliance ---------- */
 function renderTagCompliance(){
   var taggedCount = ops.filter(function(o){ return o.tagged; }).length;
@@ -2196,6 +2268,7 @@ var MODE_META = {
   dashboard: { title: 'Portfolio dashboard', sub: 'Waste and savings rolled up across every client, updated as opportunities move through the loop.', fn: renderDashboard },
   visibility: { title: 'Cost Visibility', sub: 'Where spend originates, before optimization \u2014 by application, environment, cloud, and region. Demo Data, 60-day sample window.', fn: renderVisibility },
   tags: { title: 'Tag Compliance', sub: 'Resource tagging coverage across clients and categories \u2014 a core FinOps governance metric.', fn: renderTagCompliance },
+  unitecon: { title: 'Unit Economics', sub: 'Cost per customer, per application, and per workload \u2014 the difference between knowing spend moved and knowing why margins moved.', fn: renderUnitEconomics },
   cockpit: { title: 'Opportunities across your clients', sub: 'Perceive \u2192 reason \u2192 decide runs automatically. Review below and approve what should execute.', fn: renderCockpit },
   approvals: { title: 'Approval Centre', sub: 'Every recommendation awaiting a decision, across all clients, ranked by value.', fn: renderApprovalCentre },
   execution: { title: 'Execution & Validation', sub: 'What\u2019s actively being executed, and how far each change has been validated before savings are confirmed.', fn: renderExecutionValidation },
@@ -2320,31 +2393,7 @@ function sendAskCCM(channel){
     return;
   }
 
-  // Navigate / filter / simulator actions: detected instantly, no AI call at
-  // all. This is the genuinely agentic part — real actions, zero latency,
-  // never dependent on a model's reliability. Falls through to the AI
-  // below only for open-ended questions that don't match an action intent.
-  var NAV_WORDS = { dashboard:'dashboard', visibility:'visibility', 'cost visibility':'visibility', tags:'tags', 'tag compliance':'tags',
-    cockpit:'cockpit', 'msp cockpit':'cockpit', approval:'approvals', approvals:'approvals', execution:'execution', 'validation':'execution',
-    report:'report', chargeback:'chargeback', 'data sources':'datasources', audit:'audit', settings:'settings', guardrails:'settings', roadmap:'roadmap' };
-  if (/^(go to|show me|switch to|open|navigate to|take me to)\b/.test(qLower)){
-    var navKey = Object.keys(NAV_WORDS).filter(function(k){ return qLower.indexOf(k) !== -1; }).sort(function(a,b){ return b.length - a.length; })[0];
-    if (navKey){ setMode(NAV_WORDS[navKey]); addCCMMessage('assistant', 'Switched to ' + NAV_WORDS[navKey] + '.', channel); return; }
-  }
-  if (/^(filter to|filter by|scope to|show only)\b/.test(qLower) || /^(show|filter)\b.*\bclient\b/.test(qLower)){
-    var clientMatch = CLIENTS.filter(function(c){ return qLower.indexOf(c.name.toLowerCase()) !== -1; })[0];
-    if (/\ball\b/.test(qLower)){ setSelectedClient('all'); addCCMMessage('assistant', 'Filtered to all clients.', channel); return; }
-    if (clientMatch){ setSelectedClient(clientMatch.id); addCCMMessage('assistant', 'Filtered to ' + clientMatch.name + '.', channel); return; }
-  }
-  var confMatch = qLower.match(/(?:confidence|threshold)\D{0,10}(\d{2,3})/) || (/what.?if/.test(qLower) ? qLower.match(/(\d{2,3})/) : null);
-  if (confMatch && /confidence|threshold|what.?if|simulator/.test(qLower)){
-    var confVal = Math.max(50, Math.min(100, parseInt(confMatch[1], 10)));
-    setWhatIfConfidence(confVal);
-    addCCMMessage('assistant', 'What-if simulator set to ' + confVal + '% confidence.', channel);
-    return;
-  }
-
-  var loadingMsgId = addCCMMessage('assistant', 'Thinking… (can take up to a minute on this server)', channel);
+  var loadingMsgId = addCCMMessage('assistant', 'Thinking…', channel);
   callAgenticLLM(q, function(progressText){
     updateCCMMessage(loadingMsgId, progressText);
   }).then(function(text){
@@ -2468,9 +2517,9 @@ loadExtraData().then(function(){
    control (UBU01), locked to your VPN range at the firewall. Nothing
    here calls out to the public internet at inference time.
    ===================================================================== */
-var OLLAMA_URL = "http://10.134.15.166:11434/api/chat";
+var OLLAMA_URL = "http://localhost:11434/api/chat";
 var OLLAMA_MODEL = "llama3.2:3b";
-var OLLAMA_TIMEOUT_MS = 90000; // CPU-only inference on shared lab hardware varies a lot (2s-30s+ observed); give it real room
+var OLLAMA_TIMEOUT_MS = 30000; // your laptop has handled this comfortably in testing
 
 // ---- Tool schema: the ONLY actions the model is allowed to trigger.
 // The model can propose a call; this code validates and executes it.
