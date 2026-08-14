@@ -278,6 +278,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       </div>
       <div class="ccm-chat-tools">
         <button class="ccm-chat-tool active" id="ccm-speech-toggle" onclick="toggleSpeechOutput()" title="Spoken responses">🔊</button>
+        <button class="ccm-chat-tool" onclick="downloadCCMTranscriptSummary()" title="Download session summary">⬇</button>
         <button class="ccm-chat-tool" onclick="clearAskCCM()" title="Clear conversation">↺</button>
         <button class="ccm-chat-tool" onclick="toggleAskCCM()" title="Close">×</button>
       </div>
@@ -2292,6 +2293,7 @@ function render(){
 
 /* ---------- Ask CCM: local chat + voice MVP ---------- */
 var askCCMState = { open:false, speech:true, recognition:null, pendingApprovalId:null };
+var ccmTranscript = [];
 function askCCMCurrentScope(){
   var id = currentScopeClientId();
   return id === 'all' ? 'all' : id;
@@ -2318,6 +2320,7 @@ function toggleAskCCM(){
 function clearAskCCM(){
   document.getElementById('ccm-chat-messages').innerHTML='';
   askCCMState.pendingApprovalId=null;
+  ccmTranscript = [];
   addCCMMessage('assistant','Conversation cleared. What would you like to know about '+askCCMScopeName()+'?');
   logConversationalAudit('Chat conversation cleared','Chat','—');
 }
@@ -2327,6 +2330,61 @@ function toggleSpeechOutput(){
   document.getElementById('ccm-speech-toggle').textContent=askCCMState.speech?'🔊':'🔇';
   if(!askCCMState.speech && window.speechSynthesis) window.speechSynthesis.cancel();
 }
+
+function downloadCCMTranscriptSummary(){
+  if (!ccmTranscript.length){ alert('There is no conversation to export yet — ask CCM something first.'); return; }
+
+  var scope = ccmTranscript[ccmTranscript.length - 1].scope || askCCMScopeName();
+  var startTs = ccmTranscript[0].ts, endTs = ccmTranscript[ccmTranscript.length - 1].ts;
+  var fmtTime = function(d){ return d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }); };
+
+  // Key figures cited — pulled directly from the assistant's own answers via
+  // pattern matching (dollar amounts, percentages, recommendation IDs).
+  // This is deterministic extraction, not a model-generated summary, so it
+  // never invents anything that wasn't actually said in the conversation.
+  var dollarAmounts = [], percentages = [], recIds = [];
+  ccmTranscript.filter(function(m){ return m.role === 'assistant'; }).forEach(function(m){
+    (m.text.match(/\$[\d,]+(?:\.\d+)?/g) || []).forEach(function(x){ if (dollarAmounts.indexOf(x) === -1) dollarAmounts.push(x); });
+    (m.text.match(/\b\d{1,3}%/g) || []).forEach(function(x){ if (percentages.indexOf(x) === -1) percentages.push(x); });
+    (m.text.match(/\b(?:ID|recommendation)\s*#?\s*(\d+)\b/gi) || []).forEach(function(x){ if (recIds.indexOf(x) === -1) recIds.push(x); });
+  });
+  var questionCount = ccmTranscript.filter(function(m){ return m.role === 'user'; }).length;
+  var voiceCount = ccmTranscript.filter(function(m){ return m.role === 'user' && m.channel === 'Voice'; }).length;
+
+  var transcriptRows = ccmTranscript.map(function(m){
+    var who = m.role === 'user' ? 'Engineer' : 'Ask CCM';
+    return '<div style="margin-bottom:14px;"><div style="font-size:11px;color:#666;margin-bottom:2px;">' + who + ' \u00b7 ' + m.channel + ' \u00b7 ' + fmtTime(m.ts) + '</div>' +
+      '<div style="font-size:13.5px;color:#111;' + (m.role === 'user' ? 'font-weight:600;' : '') + '">' + m.text.replace(/</g,'&lt;') + '</div></div>';
+  }).join('');
+
+  var keyFiguresHtml =
+    (dollarAmounts.length ? '<p><b>Dollar figures cited:</b> ' + dollarAmounts.join(', ') + '</p>' : '') +
+    (percentages.length ? '<p><b>Percentages cited:</b> ' + percentages.join(', ') + '</p>' : '') +
+    (recIds.length ? '<p><b>Recommendation IDs discussed:</b> ' + recIds.join(', ') + '</p>' : '') +
+    (!dollarAmounts.length && !percentages.length && !recIds.length ? '<p style="color:#666;">No specific figures were cited in this conversation.</p>' : '');
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Ask CCM Session Summary</title>' +
+    '<style>body{font-family:Calibri,Arial,sans-serif;max-width:720px;margin:40px auto;color:#111;line-height:1.5;}' +
+    'h1{font-size:22px;border-bottom:2px solid #333;padding-bottom:8px;}h2{font-size:16px;margin-top:28px;border-bottom:1px solid #ccc;padding-bottom:4px;}' +
+    '.meta{color:#666;font-size:13px;margin-bottom:20px;}.box{background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:14px 18px;}</style></head><body>' +
+    '<h1>Ask CCM \u2014 Session Summary</h1>' +
+    '<div class="meta">Client scope: <b>' + scope + '</b><br>Session: ' + fmtTime(startTs) + ' to ' + fmtTime(endTs) + '<br>' +
+    questionCount + ' question(s) asked (' + voiceCount + ' by voice)<br>Generated ' + fmtTime(new Date()) + '</div>' +
+    '<h2>Key figures discussed</h2><div class="box">' + keyFiguresHtml + '</div>' +
+    '<h2>Full transcript</h2>' + transcriptRows +
+    '<p style="margin-top:30px;color:#888;font-size:11.5px;">This summary reflects only what was said in this conversation. Use it alongside the Per Client Cost Data Capture Template to update formal client reporting \u2014 it is a working record, not a verified report on its own.</p>' +
+    '</body></html>';
+
+  var blob = new Blob([html], { type: 'text/html' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'ask-ccm-session-' + scope.replace(/\s+/g,'-').toLowerCase() + '-' + Date.now() + '.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+}
 function addCCMMessage(role,text,channel){
   var box=document.getElementById('ccm-chat-messages');
   var div=document.createElement('div'); div.className='ccm-msg '+role;
@@ -2335,6 +2393,7 @@ function addCCMMessage(role,text,channel){
   var meta=document.createElement('div'); meta.className='ccm-msg-meta';
   meta.textContent=(channel||'Chat')+' · '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   div.appendChild(meta); box.appendChild(div); box.scrollTop=box.scrollHeight;
+  ccmTranscript.push({ id:id, role:role, text:text, channel:channel||'Chat', ts:new Date(), scope:askCCMScopeName() });
   return id;
 }
 function updateCCMMessage(id, text){
@@ -2342,6 +2401,8 @@ function updateCCMMessage(id, text){
   var meta=div.querySelector('.ccm-msg-meta');
   div.textContent=text; if(meta) div.appendChild(meta);
   var box=document.getElementById('ccm-chat-messages'); if(box) box.scrollTop=box.scrollHeight;
+  var entry = ccmTranscript.filter(function(m){ return m.id === id; })[0];
+  if (entry) entry.text = text;
 }
 function removeCCMMessage(id){
   var div=document.getElementById(id); if(div) div.remove();
