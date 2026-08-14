@@ -234,6 +234,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       <button class="navbtn" id="nav-visibility" onclick="setMode('visibility')"></button>
       <button class="navbtn" id="nav-tags" onclick="setMode('tags')"></button>
       <button class="navbtn" id="nav-unitecon" onclick="setMode('unitecon')"></button>
+      <button class="navbtn" id="nav-aicost" onclick="setMode('aicost')"></button>
       <button class="navbtn" id="nav-cockpit" onclick="setMode('cockpit')"></button>
       <button class="navbtn" id="nav-approvals" onclick="setMode('approvals')"></button>
       <button class="navbtn" id="nav-execution" onclick="setMode('execution')"></button>
@@ -529,9 +530,9 @@ var APPLICATIONS = [
   { name: "promo-engine",       client: "acme",  env: "Staging",     cloud: "AWS",   region: "us-east-1",  service: "Lambda",      dailyBase: 220, owner: "Priya N.",  utilizationPct: 38 },
   { name: "patient-portal",     client: "nova",  env: "Production",  cloud: "Azure", region: "eastus",     service: "App Service", dailyBase: 650, owner: "Sana K.",   utilizationPct: 68 },
   { name: "claims-processor",   client: "nova",  env: "Production",  cloud: "Azure", region: "eastus",     service: "AKS",         dailyBase: 430, owner: "Sana K.",   utilizationPct: 55 },
-  { name: "analytics-pipeline", client: "nova",  env: "Production",  cloud: "AWS",   region: "us-east-1",  service: "SageMaker",   dailyBase: 90,  owner: "Sana K.",   utilizationPct: 47 },
+  { name: "analytics-pipeline", client: "nova",  env: "Production",  cloud: "AWS",   region: "us-east-1",  service: "SageMaker",   dailyBase: 90,  owner: "Sana K.",   utilizationPct: 47, aiWorkload: true, aiModel: "Forecasting model (SageMaker)" },
   { name: "fleet-telemetry",    client: "lumen", env: "Production",  cloud: "GCP",   region: "us-central1",service: "GKE",         dailyBase: 900, owner: "Marcus T.", utilizationPct: 73 },
-  { name: "vision-inference",   client: "lumen", env: "Production",  cloud: "AWS",   region: "us-west-2",  service: "SageMaker",   dailyBase: 700, owner: "Marcus T.", utilizationPct: 61 },
+  { name: "vision-inference",   client: "lumen", env: "Production",  cloud: "AWS",   region: "us-west-2",  service: "SageMaker",   dailyBase: 700, owner: "Marcus T.", utilizationPct: 61, aiWorkload: true, aiModel: "Computer vision inference endpoint (SageMaker)" },
   { name: "ops-dashboard",      client: "lumen", env: "Staging",     cloud: "GCP",   region: "us-central1",service: "Cloud Run",   dailyBase: 260, owner: "Marcus T.", utilizationPct: 29 },
   { name: "dev-sandbox",        client: "lumen", env: "Development", cloud: "AWS",   region: "us-east-1",  service: "EC2",         dailyBase: 130, owner: "Marcus T.", utilizationPct: 18 }
 ];
@@ -617,6 +618,7 @@ var NAV_ITEMS = [
   { id: 'nav-visibility', mode: 'visibility', icon: 'layers', label: 'Cost Visibility' },
   { id: 'nav-tags', mode: 'tags', icon: 'checkCircle', label: 'Tag Compliance' },
   { id: 'nav-unitecon', mode: 'unitecon', icon: 'trendingDown', label: 'Unit Economics' },
+  { id: 'nav-aicost', mode: 'aicost', icon: 'zap', label: 'AI Cost Visibility' },
   { id: 'nav-cockpit', mode: 'cockpit', icon: 'grid', label: 'MSP cockpit' },
   { id: 'nav-approvals', mode: 'approvals', icon: 'clipboardCheck', label: 'Approval Centre' },
   { id: 'nav-execution', mode: 'execution', icon: 'playCircle', label: 'Execution & Validation' },
@@ -1416,6 +1418,7 @@ var ROADMAP_ITEMS = [
   { name: 'Real ITSM approval / workflow engine wiring', status: 'Planned' },
   { name: 'Multi-tenant domain separation (true customer isolation)', status: 'Planned' },
   { name: 'FOCUS-compliant normalized billing model', status: 'Future Roadmap' },
+  { name: 'AI/ML workload cost visibility (service-level detection built; per-model cost tagging still needed)', status: 'MVP' },
   { name: 'Chargeback and showback statement (per-client, invoice-style)', status: 'MVP' },
   { name: 'Commitment and reservation management', status: 'Future Roadmap' },
   { name: 'Kubernetes cost allocation', status: 'Future Roadmap' },
@@ -1815,6 +1818,39 @@ function renderVisibility(){
   var narrativeHtml = '<div class="narrative-card" style="margin-top:16px;">' + narrative + '</div>';
 
   document.getElementById('content').innerHTML = filterHtml + statsHtml + gaugeHtml + anomalyHtml + chartsHtml + donutsHtml + tableHtml + narrativeHtml;
+}
+
+/* ---------- render: AI Cost Visibility ---------- */
+function renderAICostVisibility(){
+  var aiApps = APPLICATIONS.filter(function(a){ return a.aiWorkload; });
+  var nonAiApps = APPLICATIONS.filter(function(a){ return !a.aiWorkload; });
+  var aiMonthlySpend = aiApps.reduce(function(s,a){ return s + a.dailyBase * 30; }, 0);
+  var totalMonthlySpend = APPLICATIONS.reduce(function(s,a){ return s + a.dailyBase * 30; }, 0);
+  var aiPct = totalMonthlySpend ? Math.round((aiMonthlySpend / totalMonthlySpend) * 100) : 0;
+
+  var statsHtml = '<div class="stats">' +
+    '<div class="stat-card"><div class="stat-label">AI / ML monthly spend</div><div class="stat-value display">' + money(aiMonthlySpend) + '</div><div class="stat-sub">across ' + aiApps.length + ' identified workload' + (aiApps.length === 1 ? '' : 's') + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Share of total application spend</div><div class="stat-value display">' + aiPct + '%</div><div class="stat-sub">of ' + money(totalMonthlySpend) + ' tracked total</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Clients running AI workloads</div><div class="stat-value display">' + Array.from(new Set(aiApps.map(function(a){ return a.client; }))).length + ' of ' + CLIENTS.length + '</div><div class="stat-sub">have at least one identified AI/ML service</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Detection basis</div><div class="stat-value display" style="font-size:20px;">Service-level</div><div class="stat-sub">identified via SageMaker and similar ML services</div></div>' +
+    '</div>';
+
+  var aiListHtml = '<div class="section-title" style="margin-top:16px;">Identified AI / ML workloads</div><div class="list">' +
+    (aiApps.length ? aiApps.map(function(a){
+      var c = clientById(a.client);
+      return '<div class="list-row"><div><div class="name">' + a.name + '</div><div class="sub">' + c.name + ' \u00b7 ' + a.cloud + ' ' + a.service + ' \u00b7 ' + a.env + ' \u00b7 ' + a.aiModel + '</div></div>' +
+        '<div class="amt display">' + money(a.dailyBase * 30) + '/mo</div></div>';
+    }).join('') : '<div class="empty">No AI/ML-specific services identified this period.</div>') + '</div>';
+
+  var barItems = aiApps.map(function(a){
+    return { label: a.name + ' (' + clientById(a.client).name + ')', value: a.dailyBase * 30, valueLabel: money(a.dailyBase * 30) + '/mo', color: 'var(--purple)' };
+  });
+  var chartHtml = '<div class="card" style="margin-top:16px;">' +
+    '<div class="section-title">AI / ML spend by workload</div>' + hbarChart(barItems) + '</div>';
+
+  var narrativeHtml = '<div class="narrative-card" style="margin-top:16px;">AI and ML spend is identified here at the service level, workloads explicitly running on a machine learning platform such as SageMaker. This is a starting point, not a complete answer: as the article behind this build noted, AI costs increasingly get embedded inside general compute, storage, and API line items where they are invisible to standard billing tools. Closing that gap fully would need per-model and per-inference cost tagging from each cloud provider\u2019s own AI billing detail, not just service-name detection.</div>';
+
+  document.getElementById('content').innerHTML = statsHtml + aiListHtml + chartHtml + narrativeHtml;
 }
 
 /* ---------- render: Unit Economics ---------- */
@@ -2270,6 +2306,7 @@ var MODE_META = {
   visibility: { title: 'Cost Visibility', sub: 'Where spend originates, before optimization \u2014 by application, environment, cloud, and region. Demo Data, 60-day sample window.', fn: renderVisibility },
   tags: { title: 'Tag Compliance', sub: 'Resource tagging coverage across clients and categories \u2014 a core FinOps governance metric.', fn: renderTagCompliance },
   unitecon: { title: 'Unit Economics', sub: 'Cost per customer, per application, and per workload \u2014 the difference between knowing spend moved and knowing why margins moved.', fn: renderUnitEconomics },
+  aicost: { title: 'AI Cost Visibility', sub: 'AI and ML workload spend surfaced as its own category \u2014 often invisible to standard billing tools until it is already large.', fn: renderAICostVisibility },
   cockpit: { title: 'Opportunities across your clients', sub: 'Perceive \u2192 reason \u2192 decide runs automatically. Review below and approve what should execute.', fn: renderCockpit },
   approvals: { title: 'Approval Centre', sub: 'Every recommendation awaiting a decision, across all clients, ranked by value.', fn: renderApprovalCentre },
   execution: { title: 'Execution & Validation', sub: 'What\u2019s actively being executed, and how far each change has been validated before savings are confirmed.', fn: renderExecutionValidation },
