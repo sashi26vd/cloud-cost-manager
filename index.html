@@ -2454,10 +2454,26 @@ function sendAskCCM(channel){
     return;
   }
 
+// Local models often output markdown (**bold**, bullet asterisks) even when
+// asked not to. The chat displays plain text, not rendered HTML, so left
+// as-is those symbols show up literally. Strip them at the source, once,
+// so both the live chat and the exported transcript summary are clean.
+function stripMarkdown(text){
+  var t = String(text).replace(/\*\*(.*?)\*\*/g, '$1');
+  // Small models frequently emit list items as inline "* item * item" without
+  // real line breaks between them. Any remaining single "*" is being used as
+  // a bullet marker wherever it appears in the string, not just at a true
+  // line start — turn each into its own line so it displays as an actual list.
+  t = t.replace(/\s*\*\s+/g, '\n\u2022 ');
+  t = t.replace(/^#{1,6}\s*/gm, '');
+  return t.trim();
+}
+
   var loadingMsgId = addCCMMessage('assistant', 'Thinking…', channel);
   callAgenticLLM(q, function(progressText){
     updateCCMMessage(loadingMsgId, progressText);
   }).then(function(text){
+    text = stripMarkdown(text);
     updateCCMMessage(loadingMsgId, text);
     speakCCM(text);
   }).catch(function(err){
