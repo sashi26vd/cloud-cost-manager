@@ -273,7 +273,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       <div>
         <div class="ccm-chat-title">Ask CCM</div>
         <div class="ccm-chat-sub">Cloud cost advisor · Chat and voice</div>
-        <span class="ccm-chat-badge">AGENTIC LOCAL AI · On-device (WebLLM) · fallback: rule-based</span>
+
       </div>
       <div class="ccm-chat-tools">
         <button class="ccm-chat-tool active" id="ccm-speech-toggle" onclick="toggleSpeechOutput()" title="Spoken responses">🔊</button>
@@ -2466,7 +2466,8 @@ var appConfig = {
     // model_lib must point at the matching prebuilt wasm runtime for this
     // model + quantization — get the current URL from mlc-ai/binary-mlc-llm-libs
     // on GitHub for the version of web-llm you're loading above.
-    model_lib: "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/Hermes-2-Pro-Llama-3-8B-q4f16_1-ctx4k_cs1k-webgpu.wasm"
+    model_lib: "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_84/base/Llama-3-8B-Instruct-q4f16_1_cs1k-webgpu.wasm",
+    overrides: { context_window_size: 4096 }
   }]
 };
 
